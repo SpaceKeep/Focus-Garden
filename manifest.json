@@ -1,13 +1,33 @@
 {
   "manifest_version": 3,
   "name": "Focus Garden",
-  "version": "1.1",
+  "version": "1.5",
+  "description": "A Pomodoro focus timer with local tasks, session history, customizable breaks, daily goals, and a growing virtual garden.",
+  "homepage_url": "https://github.com/SpaceKeep/Focus-Garden",
+  "minimum_chrome_version": "109",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "focus-garden@spacekeep.dev",
+      "strict_min_version": "140.0"
+    }
+  },
   "action": {
     "default_popup": "index.html",
-    "default_icon": "icon.svg"
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
   },
   "icons": {
-    "128": "icon.svg"
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
   },
-  "permissions": ["storage"]
+  "permissions": ["storage", "notifications", "alarms"]
 }
