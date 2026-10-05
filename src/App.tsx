@@ -51,6 +51,7 @@ interface StorageValues {
   onboardingDone?: boolean;
   plantName?: string;
   plantSpecies?: string;
+  dailyGoalSessions?: number;
 }
 
 interface StorageChange {
@@ -161,6 +162,7 @@ function App() {
   const [storageLoaded, setStorageLoaded] = useState(() => !getExtensionApi()?.storage);
   const [plantName, setPlantName] = useState("My Plant");
   const [plantSpecies, setPlantSpecies] = useState<PlantSpecies>("herb");
+  const [dailyGoalSessions, setDailyGoalSessions] = useState(4);
 
   const timeLeftRef = useRef(timeLeft);
   const isActiveRef = useRef(isActive);
@@ -198,7 +200,7 @@ function App() {
     extensionApi.storage.local.get(
       ["endTime", "isActive", "focusSessions", "totalFocusSessions", "customMinutes", "breakMinutes",
         "breakModeEnabled", "timerMode", "timeLeftSeconds", "sessionHistory",
-        "lastSessionDate", "onboardingDone", "plantName", "plantSpecies"],
+        "lastSessionDate", "onboardingDone", "plantName", "plantSpecies", "dailyGoalSessions"],
       (res) => {
         // Daily reset
         const today = getToday();
@@ -219,6 +221,7 @@ function App() {
         setSessionHistory(history);
         setPlantName(getSavedPlantName(res.plantName));
         setPlantSpecies(getStoredPlantSpecies(res.plantSpecies));
+        setDailyGoalSessions(Math.min(24, Math.max(1, res.dailyGoalSessions || 4)));
 
         const nextFocus = res.customMinutes || 25;
         const nextBreak = res.breakMinutes || 5;
@@ -446,6 +449,7 @@ function App() {
     endTimeRef.current = null;
     extensionApi?.storage?.local.set({
       customMinutes, breakMinutes, breakModeEnabled, plantName: savedPlantName, plantSpecies,
+      dailyGoalSessions,
       isActive: false, endTime: null, timerMode: "focus", timeLeftSeconds: customMinutes * 60,
     });
     extensionApi?.runtime?.sendMessage({ type: "stopTimer" }, () => { void extensionApi.runtime?.lastError; });
@@ -590,6 +594,8 @@ function App() {
             <input type="number" value={customMinutes} onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) setCustomMinutes(v); }} className="w-full bg-slate-900 border border-slate-800 p-4 rounded-2xl text-green-400 text-3xl font-mono text-center focus:outline-none focus:border-green-500" />
             <h2 className="text-center text-xs text-slate-500 uppercase tracking-widest">Break Minutes</h2>
             <input type="number" value={breakMinutes} onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) setBreakMinutes(v); }} className="w-full bg-slate-900 border border-slate-800 p-4 rounded-2xl text-sky-400 text-3xl font-mono text-center focus:outline-none focus:border-sky-500" />
+            <h2 className="text-center text-xs text-slate-500 uppercase tracking-widest">Daily Focus Goal (sessions)</h2>
+            <input type="number" min={1} max={24} value={dailyGoalSessions} onChange={(e) => { const v = Number(e.target.value); if (Number.isInteger(v)) setDailyGoalSessions(Math.min(24, Math.max(1, v))); }} className="w-full bg-slate-900 border border-slate-800 p-3 rounded-2xl text-amber-300 text-xl font-mono text-center focus:outline-none focus:border-amber-400" />
             <label className="flex items-center justify-between bg-slate-900 border border-slate-800 p-4 rounded-2xl">
               <span className="text-sm uppercase tracking-widest text-slate-400">Break Mode</span>
               <button type="button" onClick={() => setBreakModeEnabled((prev) => !prev)} className={`w-14 h-8 rounded-full transition-colors ${breakModeEnabled ? "bg-green-500" : "bg-slate-700"}`}>
@@ -735,6 +741,23 @@ function App() {
               />
               <p className="text-green-400 font-semibold">{plantName}</p>
               <p className="text-white font-medium">{sessions} Sessions today</p>
+              <div className="mt-4 text-left">
+                <div className="mb-2 flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Daily goal</span>
+                  <span className="font-semibold text-amber-300">{Math.min(sessions, dailyGoalSessions)} / {dailyGoalSessions}</span>
+                </div>
+                <div
+                  className="h-2 overflow-hidden rounded-full bg-slate-800"
+                  role="progressbar"
+                  aria-label="Daily focus goal progress"
+                  aria-valuemin={0}
+                  aria-valuemax={dailyGoalSessions}
+                  aria-valuenow={Math.min(sessions, dailyGoalSessions)}
+                >
+                  <div className="h-full rounded-full bg-amber-400 transition-all" style={{ width: `${Math.min(100, (sessions / dailyGoalSessions) * 100)}%` }} />
+                </div>
+                {sessions >= dailyGoalSessions && <p className="mt-2 text-xs font-medium text-amber-300">Daily goal reached — lovely work! ✨</p>}
+              </div>
               <p className="mt-1 text-xs text-slate-400">{totalFocusSessions} total completed sessions</p>
             </div>
           </div>
