@@ -63,7 +63,7 @@ function recoverAlarmFromStorage() {
 
 function completeSessionIfActive(expected = {}) {
   chrome.storage.local.get(
-    ["isActive", "endTime", "focusSessions", "totalFocusSessions", "timerMode", "breakModeEnabled", "breakMinutes", "customMinutes", "lastSessionDate", "sessionHistory"],
+    ["isActive", "endTime", "focusSessions", "totalFocusSessions", "timerMode", "breakModeEnabled", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "customMinutes", "lastSessionDate", "sessionHistory"],
     (res) => {
       if (!res.isActive) return;
 
@@ -84,20 +84,26 @@ function completeSessionIfActive(expected = {}) {
         }
 
         const newSessions = currentSessions + 1;
-  const newTotalSessions = (res.totalFocusSessions || 0) + 1;
+        const newTotalSessions = (res.totalFocusSessions || 0) + 1;
         const breakModeEnabled = res.breakModeEnabled ?? true;
+        const cycleCount = (res.completedFocusSessionsInCycle || 0) + 1;
+        const sessionsUntilLongBreak = Math.min(12, Math.max(2, res.sessionsUntilLongBreak || 4));
+        const longBreakDue = cycleCount >= sessionsUntilLongBreak;
+        const nextCycleCount = longBreakDue ? 0 : cycleCount;
+        const nextBreakMinutes = longBreakDue ? (res.longBreakMinutes || 15) : (res.breakMinutes || 5);
 
         if (breakModeEnabled) {
-          const breakMinutes = res.breakMinutes || 5;
-          const endTime = Date.now() + breakMinutes * 60 * 1000;
+          const endTime = Date.now() + nextBreakMinutes * 60 * 1000;
 
           chrome.storage.local.set({
             isActive: true,
             endTime,
             timerMode: "break",
+            isLongBreak: longBreakDue,
             focusSessions: newSessions,
             totalFocusSessions: newTotalSessions,
-            timeLeftSeconds: breakMinutes * 60,
+            timeLeftSeconds: nextBreakMinutes * 60,
+            completedFocusSessionsInCycle: nextCycleCount,
             lastSessionDate: today,
             sessionHistory: history
           });
@@ -108,8 +114,10 @@ function completeSessionIfActive(expected = {}) {
             isActive: false,
             endTime: null,
             timerMode: "focus",
+            isLongBreak: false,
             focusSessions: newSessions,
             totalFocusSessions: newTotalSessions,
+            completedFocusSessionsInCycle: nextCycleCount,
             timeLeftSeconds: (res.customMinutes || 25) * 60,
             lastSessionDate: today,
             sessionHistory: history
@@ -125,6 +133,7 @@ function completeSessionIfActive(expected = {}) {
         isActive: false,
         endTime: null,
         timerMode: "focus",
+        isLongBreak: false,
         timeLeftSeconds: (res.customMinutes || 25) * 60,
         lastSessionDate: getToday(),
         sessionHistory: res.sessionHistory || []

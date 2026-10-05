@@ -43,6 +43,10 @@ interface StorageValues {
   totalFocusSessions?: number;
   customMinutes?: number;
   breakMinutes?: number;
+  longBreakMinutes?: number;
+  sessionsUntilLongBreak?: number;
+  completedFocusSessionsInCycle?: number;
+  isLongBreak?: boolean;
   breakModeEnabled?: boolean;
   timerMode?: TimerMode;
   timeLeftSeconds?: number;
@@ -155,6 +159,10 @@ function App() {
   const [view, setView] = useState<View>("timer");
   const [customMinutes, setCustomMinutes] = useState(25);
   const [breakMinutes, setBreakMinutes] = useState(5);
+  const [longBreakMinutes, setLongBreakMinutes] = useState(15);
+  const [sessionsUntilLongBreak, setSessionsUntilLongBreak] = useState(4);
+  const [isLongBreak, setIsLongBreak] = useState(false);
+  const [completedFocusSessionsInCycle, setCompletedFocusSessionsInCycle] = useState(0);
   const [breakModeEnabled, setBreakModeEnabled] = useState(true);
   const [timerMode, setTimerMode] = useState<TimerMode>("focus");
   const [totalSeconds, setTotalSeconds] = useState(25 * 60);
@@ -198,7 +206,7 @@ function App() {
     }
 
     extensionApi.storage.local.get(
-      ["endTime", "isActive", "focusSessions", "totalFocusSessions", "customMinutes", "breakMinutes",
+      ["endTime", "isActive", "focusSessions", "totalFocusSessions", "customMinutes", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "isLongBreak",
         "breakModeEnabled", "timerMode", "timeLeftSeconds", "sessionHistory",
         "lastSessionDate", "onboardingDone", "plantName", "plantSpecies", "dailyGoalSessions"],
       (res) => {
@@ -225,10 +233,16 @@ function App() {
 
         const nextFocus = res.customMinutes || 25;
         const nextBreak = res.breakMinutes || 5;
+        const nextLongBreak = res.longBreakMinutes || 15;
         const nextMode: TimerMode = res.timerMode || "focus";
+        const nextIsLongBreak = res.isLongBreak ?? false;
 
         setCustomMinutes(nextFocus);
         setBreakMinutes(nextBreak);
+        setLongBreakMinutes(Math.min(60, Math.max(1, nextLongBreak)));
+        setSessionsUntilLongBreak(Math.min(12, Math.max(2, res.sessionsUntilLongBreak || 4)));
+        setIsLongBreak(nextIsLongBreak);
+        setCompletedFocusSessionsInCycle(res.completedFocusSessionsInCycle || 0);
         setBreakModeEnabled(res.breakModeEnabled ?? true);
         setTimerMode(nextMode);
 
@@ -239,13 +253,13 @@ function App() {
         if (res.isActive && res.endTime) {
           const remaining = Math.max(0, Math.round((res.endTime - Date.now()) / 1000));
           if (remaining > 0) {
-            const full = (nextMode === "focus" ? nextFocus : nextBreak) * 60;
+            const full = (nextMode === "focus" ? nextFocus : nextIsLongBreak ? nextLongBreak : nextBreak) * 60;
             endTimeRef.current = res.endTime;
             setTotalSeconds(full);
             setTimeLeft(remaining);
             setIsActive(true);
           } else {
-            const full = (nextMode === "focus" ? nextFocus : nextBreak) * 60;
+            const full = (nextMode === "focus" ? nextFocus : nextIsLongBreak ? nextLongBreak : nextBreak) * 60;
             endTimeRef.current = null;
             setTotalSeconds(full);
             setIsActive(false);
@@ -255,7 +269,7 @@ function App() {
           endTimeRef.current = null;
           setIsActive(false);
           const stored = res.timeLeftSeconds;
-          const full = (nextMode === "focus" ? nextFocus : nextBreak) * 60;
+          const full = (nextMode === "focus" ? nextFocus : nextIsLongBreak ? nextLongBreak : nextBreak) * 60;
           const left = typeof stored === "number" && stored > 0 ? stored : full;
           setTotalSeconds(full);
           setTimeLeft(left);
@@ -268,30 +282,36 @@ function App() {
       if (areaName !== "local") return;
       const activeChanged = changes.isActive;
       const modeChanged = changes.timerMode;
+      const breakTypeChanged = changes.isLongBreak;
+      const cycleChanged = changes.completedFocusSessionsInCycle;
       const sessionsChanged = changes.focusSessions;
       const totalSessionsChanged = changes.totalFocusSessions;
       const historyChanged = changes.sessionHistory;
 
-      if (!activeChanged && !modeChanged && !sessionsChanged && !totalSessionsChanged && !historyChanged) return;
+      if (!activeChanged && !modeChanged && !breakTypeChanged && !cycleChanged && !sessionsChanged && !totalSessionsChanged && !historyChanged) return;
 
       extensionApi.storage?.local.get(
-        ["isActive", "timerMode", "endTime", "focusSessions", "totalFocusSessions", "customMinutes",
-          "breakMinutes", "breakModeEnabled", "sessionHistory", "timeLeftSeconds"],
+        ["isActive", "timerMode", "endTime", "focusSessions", "totalFocusSessions", "completedFocusSessionsInCycle", "customMinutes",
+          "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "isLongBreak", "breakModeEnabled", "sessionHistory", "timeLeftSeconds"],
         (res) => {
           setSessions(res.focusSessions || 0);
           setTotalFocusSessions(res.totalFocusSessions || 0);
           setBreakModeEnabled(res.breakModeEnabled ?? true);
+          setCompletedFocusSessionsInCycle(res.completedFocusSessionsInCycle || 0);
           if (res.sessionHistory) setSessionHistory(res.sessionHistory);
 
           const nextMode: TimerMode = res.timerMode || "focus";
+          const nextIsLongBreak = res.isLongBreak ?? false;
+          setIsLongBreak(nextIsLongBreak);
           if (res.isActive && res.endTime && nextMode !== timerModeRef.current) {
             const remaining = Math.max(0, Math.round((res.endTime - Date.now()) / 1000));
             if (remaining > 0) {
-              const full = (nextMode === "focus" ? (res.customMinutes || 25) : (res.breakMinutes || 5)) * 60;
+              const full = (nextMode === "focus" ? (res.customMinutes || 25) : nextIsLongBreak ? (res.longBreakMinutes || 15) : (res.breakMinutes || 5)) * 60;
               endTimeRef.current = res.endTime;
               setTimerMode(nextMode);
               setCustomMinutes(res.customMinutes || 25);
               setBreakMinutes(res.breakMinutes || 5);
+              setLongBreakMinutes(res.longBreakMinutes || 15);
               setTotalSeconds(full);
               setTimeLeft(remaining);
               setIsActive(true);
@@ -303,11 +323,12 @@ function App() {
             setTimerMode(nextMode);
             setCustomMinutes(res.customMinutes || 25);
             setBreakMinutes(res.breakMinutes || 5);
+            setLongBreakMinutes(res.longBreakMinutes || 15);
 
             if (res.isActive && res.endTime) {
               const remaining = Math.max(0, Math.round((res.endTime - Date.now()) / 1000));
               if (remaining > 0) {
-                const full = (nextMode === "focus" ? (res.customMinutes || 25) : (res.breakMinutes || 5)) * 60;
+                const full = (nextMode === "focus" ? (res.customMinutes || 25) : nextIsLongBreak ? (res.longBreakMinutes || 15) : (res.breakMinutes || 5)) * 60;
                 endTimeRef.current = res.endTime;
                 setTotalSeconds(full);
                 setTimeLeft(remaining);
@@ -318,7 +339,7 @@ function App() {
             const nf = res.customMinutes || 25;
             const nb = res.breakMinutes || 5;
             const nm: TimerMode = res.timerMode || "focus";
-            const full = (nm === "focus" ? nf : nb) * 60;
+            const full = (nm === "focus" ? nf : nextIsLongBreak ? (res.longBreakMinutes || 15) : nb) * 60;
             endTimeRef.current = null;
             setTotalSeconds(full);
             // Use saved remaining time when paused, only reset to full on a fresh reset/complete
@@ -349,15 +370,16 @@ function App() {
       if (extensionApi.runtime?.lastError) {
         // Fallback when service worker is unreachable
         extensionApi.storage?.local.get(
-          ["focusSessions", "totalFocusSessions", "sessionHistory", "lastSessionDate", "timerMode", "customMinutes", "plantName", "plantSpecies"],
+          ["focusSessions", "totalFocusSessions", "sessionHistory", "lastSessionDate", "timerMode", "customMinutes", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "isLongBreak", "breakModeEnabled", "plantName", "plantSpecies"],
           (res) => {
             const mode: TimerMode = res.timerMode || "focus";
             if (mode === "break") {
               const full = (res.customMinutes || 25) * 60;
               setTimerMode("focus");
+              setIsLongBreak(false);
               setTimeLeft(full);
               setTotalSeconds(full);
-              extensionApi.storage?.local.set({ isActive: false, endTime: null, timerMode: "focus", timeLeftSeconds: full });
+              extensionApi.storage?.local.set({ isActive: false, endTime: null, timerMode: "focus", isLongBreak: false, timeLeftSeconds: full });
               extensionApi.action?.setBadgeText({ text: "\u2713" });
               extensionApi.action?.setBadgeBackgroundColor({ color: "#0ea5e9" });
               return;
@@ -372,18 +394,28 @@ function App() {
               currentSessions = 0;
             }
             const newSessions = currentSessions + 1;
+            const cycleCount = (res.completedFocusSessionsInCycle || 0) + 1;
+            const longBreakDue = cycleCount >= Math.min(12, Math.max(2, res.sessionsUntilLongBreak || 4));
+            const breakModeEnabled = res.breakModeEnabled ?? true;
+            const nextCycleCount = longBreakDue ? 0 : cycleCount;
             setSessions(newSessions);
             setTotalFocusSessions(newTotalSessions);
             setSessionHistory(history);
+            setCompletedFocusSessionsInCycle(breakModeEnabled ? nextCycleCount : longBreakDue ? 0 : cycleCount);
+            setIsLongBreak(false);
             setPlantName(getSavedPlantName(res.plantName));
             setPlantSpecies(getStoredPlantSpecies(res.plantSpecies));
             extensionApi.storage?.local.set({
-              isActive: false,
-              endTime: null,
               focusSessions: newSessions,
               totalFocusSessions: newTotalSessions,
               lastSessionDate: today,
               sessionHistory: history,
+              isActive: false,
+              endTime: null,
+              timerMode: "focus" as const,
+              isLongBreak: false,
+              completedFocusSessionsInCycle: breakModeEnabled ? nextCycleCount : longBreakDue ? 0 : cycleCount,
+              timeLeftSeconds: (res.customMinutes || 25) * 60,
             });
             extensionApi.action?.setBadgeText({ text: "\u2713" });
             extensionApi.action?.setBadgeBackgroundColor({ color: "#22c55e" });
@@ -415,9 +447,10 @@ function App() {
 
   const toggleTimer = () => {
     if (!isActive) {
-      const secondsToRun = timeLeft > 0 ? timeLeft : customMinutes * 60;
+      const modeDuration = timerMode === "focus" ? customMinutes : isLongBreak ? longBreakMinutes : breakMinutes;
+      const secondsToRun = timeLeft > 0 ? timeLeft : modeDuration * 60;
       const endTime = Date.now() + secondsToRun * 1000;
-      if (timeLeft <= 0) setTotalSeconds(customMinutes * 60);
+      if (timeLeft <= 0) setTotalSeconds(modeDuration * 60);
       endTimeRef.current = endTime;
       extensionApi?.storage?.local.set({ isActive: true, endTime, timerMode, timeLeftSeconds: secondsToRun });
       extensionApi?.runtime?.sendMessage({ type: "startTimer", endTime }, () => {
@@ -435,10 +468,11 @@ function App() {
   const resetTimer = () => {
     completingRef.current = false;
     endTimeRef.current = null;
-    extensionApi?.storage?.local.set({ isActive: false, endTime: null, timerMode: "focus", timeLeftSeconds: customMinutes * 60 });
+    extensionApi?.storage?.local.set({ isActive: false, endTime: null, timerMode: "focus", isLongBreak: false, timeLeftSeconds: customMinutes * 60 });
     extensionApi?.runtime?.sendMessage({ type: "stopTimer" }, () => { void extensionApi.runtime?.lastError; });
     setIsActive(false);
     setTimerMode("focus");
+    setIsLongBreak(false);
     setTotalSeconds(customMinutes * 60);
     setTimeLeft(customMinutes * 60);
   };
@@ -448,13 +482,14 @@ function App() {
     completingRef.current = false;
     endTimeRef.current = null;
     extensionApi?.storage?.local.set({
-      customMinutes, breakMinutes, breakModeEnabled, plantName: savedPlantName, plantSpecies,
+      customMinutes, breakMinutes, longBreakMinutes, sessionsUntilLongBreak, breakModeEnabled, plantName: savedPlantName, plantSpecies,
       dailyGoalSessions,
-      isActive: false, endTime: null, timerMode: "focus", timeLeftSeconds: customMinutes * 60,
+      isActive: false, endTime: null, timerMode: "focus", isLongBreak: false, completedFocusSessionsInCycle: 0, timeLeftSeconds: customMinutes * 60,
     });
     extensionApi?.runtime?.sendMessage({ type: "stopTimer" }, () => { void extensionApi.runtime?.lastError; });
     setIsActive(false);
     setTimerMode("focus");
+    setIsLongBreak(false);
     setTotalSeconds(customMinutes * 60);
     setTimeLeft(customMinutes * 60);
     setPlantName(savedPlantName);
@@ -600,11 +635,16 @@ function App() {
         )}
 
         {view === "settings" && (
-          <div className="w-full space-y-4">
+          <div className="w-full max-h-[410px] space-y-4 overflow-y-auto pr-1">
             <h2 className="text-center text-xs text-slate-500 uppercase tracking-widest">Focus Minutes</h2>
             <input type="number" value={customMinutes} onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) setCustomMinutes(v); }} className="w-full bg-slate-900 border border-slate-800 p-4 rounded-2xl text-green-400 text-3xl font-mono text-center focus:outline-none focus:border-green-500" />
             <h2 className="text-center text-xs text-slate-500 uppercase tracking-widest">Break Minutes</h2>
             <input type="number" value={breakMinutes} onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) setBreakMinutes(v); }} className="w-full bg-slate-900 border border-slate-800 p-4 rounded-2xl text-sky-400 text-3xl font-mono text-center focus:outline-none focus:border-sky-500" />
+            <h2 className="text-center text-xs text-slate-500 uppercase tracking-widest">Long Break Minutes</h2>
+            <input type="number" min={1} max={60} value={longBreakMinutes} onChange={(e) => { const v = Number(e.target.value); if (Number.isInteger(v)) setLongBreakMinutes(Math.min(60, Math.max(1, v))); }} className="w-full bg-slate-900 border border-slate-800 p-3 rounded-2xl text-sky-200 text-xl font-mono text-center focus:outline-none focus:border-sky-400" />
+            <h2 className="text-center text-xs text-slate-500 uppercase tracking-widest">Long Break After (sessions)</h2>
+            <input type="number" min={2} max={12} value={sessionsUntilLongBreak} onChange={(e) => { const v = Number(e.target.value); if (Number.isInteger(v)) setSessionsUntilLongBreak(Math.min(12, Math.max(2, v))); }} className="w-full bg-slate-900 border border-slate-800 p-3 rounded-2xl text-sky-200 text-xl font-mono text-center focus:outline-none focus:border-sky-400" />
+            <p className="-mt-2 text-center text-xs text-slate-500">The cycle starts when you save these settings.</p>
             <h2 className="text-center text-xs text-slate-500 uppercase tracking-widest">Daily Focus Goal (sessions)</h2>
             <input type="number" min={1} max={24} value={dailyGoalSessions} onChange={(e) => { const v = Number(e.target.value); if (Number.isInteger(v)) setDailyGoalSessions(Math.min(24, Math.max(1, v))); }} className="w-full bg-slate-900 border border-slate-800 p-3 rounded-2xl text-amber-300 text-xl font-mono text-center focus:outline-none focus:border-amber-400" />
             <label className="flex items-center justify-between bg-slate-900 border border-slate-800 p-4 rounded-2xl">
@@ -700,8 +740,9 @@ function App() {
         {view === "timer" && (
           <div className="w-full flex flex-col items-center">
             <div className={`mb-6 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-widest ${timerMode === "focus" ? "bg-green-500/20 text-green-300" : "bg-sky-500/20 text-sky-300"}`}>
-              {timerMode === "focus" ? "Focus" : "Break"}
+              {timerMode === "focus" ? "Focus" : isLongBreak ? "Long Break" : "Break"}
             </div>
+            {breakModeEnabled && <p className="-mt-4 mb-5 text-xs text-slate-500">Cycle: {completedFocusSessionsInCycle} / {sessionsUntilLongBreak} focus sessions</p>}
 
             {/* Circular progress ring */}
             {(() => {
