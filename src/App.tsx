@@ -500,6 +500,17 @@ function App() {
     },
     { current: 0, longest: 0 }
   ).longest;
+  const currentStreak = (() => {
+    const cursor = new Date();
+    if ((dailyCounts.get(formatLocalDate(cursor)) || 0) === 0) cursor.setDate(cursor.getDate() - 1);
+    let count = 0;
+    for (let i = 0; i < 30; i += 1) {
+      if ((dailyCounts.get(formatLocalDate(cursor)) || 0) === 0) break;
+      count += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return count;
+  })();
   const bestDayCount = Math.max(...Array.from(dailyCounts.values()), sessions, 0);
   const achievements: Achievement[] = [
     {
@@ -641,20 +652,22 @@ function App() {
                 </div>
               ))}
             </div>
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex justify-between text-center">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 grid grid-cols-2 gap-y-4 text-center">
               <div>
                 <p className="text-2xl font-bold text-green-400">{sessions}</p>
                 <p className="text-xs text-slate-500 mt-1">Today</p>
               </div>
-              <div className="border-l border-slate-800" />
               <div>
                 <p className="text-2xl font-bold text-white">{weekTotal}</p>
                 <p className="text-xs text-slate-500 mt-1">This Week</p>
               </div>
-              <div className="border-l border-slate-800" />
               <div>
                 <p className="text-2xl font-bold text-slate-300">{allTimeTotal}</p>
                 <p className="text-xs text-slate-500 mt-1">All Time</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-orange-300">{currentStreak} 🔥</p>
+                <p className="text-xs text-slate-500 mt-1">Day Streak</p>
               </div>
             </div>
             <div className="mt-5">
