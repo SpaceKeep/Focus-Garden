@@ -15,10 +15,15 @@ import {
   BadgeCheck,
   Palette,
   Lock,
+  ListTodo,
+  Plus,
+  Trash2,
+  Circle,
+  CheckCircle2,
 } from "lucide-react";
 
 type TimerMode = "focus" | "break";
-type View = "timer" | "settings" | "history" | "onboarding";
+type View = "timer" | "settings" | "history" | "tasks" | "onboarding";
 type PlantSpecies = "herb" | "succulent" | "flower";
 
 interface HistoryEntry {
@@ -30,6 +35,15 @@ interface FocusSession {
   id: string;
   completedAt: number;
   durationMinutes: number;
+  taskId?: string;
+  taskTitle?: string;
+}
+
+interface FocusTask {
+  id: string;
+  title: string;
+  createdAt: number;
+  completed: boolean;
 }
 
 interface Achievement {
@@ -58,6 +72,10 @@ interface StorageValues {
   timeLeftSeconds?: number;
   sessionHistory?: HistoryEntry[];
   focusSessionLog?: FocusSession[];
+  focusTasks?: FocusTask[];
+  activeTaskId?: string | null;
+  currentSessionTaskId?: string | null;
+  currentSessionTaskTitle?: string | null;
   lastSessionDate?: string;
   onboardingDone?: boolean;
   plantName?: string;
@@ -106,11 +124,13 @@ function getToday(): string {
   return formatLocalDate(new Date());
 }
 
-function createFocusSessionRecord(durationMinutes: number, completedAt = Date.now()): FocusSession {
+function createFocusSessionRecord(durationMinutes: number, completedAt = Date.now(), taskId?: string, taskTitle?: string): FocusSession {
   return {
     id: `${completedAt}-${Math.random().toString(36).slice(2, 8)}`,
     completedAt,
     durationMinutes,
+    ...(taskId ? { taskId } : {}),
+    ...(taskTitle ? { taskTitle } : {}),
   };
 }
 
@@ -191,6 +211,11 @@ function App() {
   const [totalSeconds, setTotalSeconds] = useState(25 * 60);
   const [sessionHistory, setSessionHistory] = useState<HistoryEntry[]>([]);
   const [focusSessionLog, setFocusSessionLog] = useState<FocusSession[]>([]);
+  const [focusTasks, setFocusTasks] = useState<FocusTask[]>([]);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [currentSessionTaskId, setCurrentSessionTaskId] = useState<string | null>(null);
+  const [currentSessionTaskTitle, setCurrentSessionTaskTitle] = useState<string | null>(null);
+  const [taskInput, setTaskInput] = useState("");
   const [storageLoaded, setStorageLoaded] = useState(() => !getExtensionApi()?.storage);
   const [plantName, setPlantName] = useState("My Plant");
   const [plantSpecies, setPlantSpecies] = useState<PlantSpecies>("herb");
@@ -231,7 +256,7 @@ function App() {
 
     extensionApi.storage.local.get(
       ["endTime", "isActive", "focusSessions", "totalFocusSessions", "customMinutes", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "isLongBreak",
-        "breakModeEnabled", "timerMode", "timeLeftSeconds", "sessionHistory", "focusSessionLog",
+        "breakModeEnabled", "timerMode", "timeLeftSeconds", "sessionHistory", "focusSessionLog", "focusTasks", "activeTaskId", "currentSessionTaskId", "currentSessionTaskTitle",
         "lastSessionDate", "onboardingDone", "plantName", "plantSpecies", "dailyGoalSessions"],
       (res) => {
         // Daily reset
@@ -252,6 +277,10 @@ function App() {
         setTotalFocusSessions(res.totalFocusSessions || 0);
         setSessionHistory(history);
         setFocusSessionLog(res.focusSessionLog || []);
+        setFocusTasks(res.focusTasks || []);
+        setActiveTaskId(res.activeTaskId ?? null);
+        setCurrentSessionTaskId(res.currentSessionTaskId ?? null);
+        setCurrentSessionTaskTitle(res.currentSessionTaskTitle ?? null);
         setPlantName(getSavedPlantName(res.plantName));
         setPlantSpecies(getStoredPlantSpecies(res.plantSpecies));
         setDailyGoalSessions(Math.min(24, Math.max(1, res.dailyGoalSessions || 4)));
@@ -313,12 +342,15 @@ function App() {
       const totalSessionsChanged = changes.totalFocusSessions;
       const historyChanged = changes.sessionHistory;
       const focusSessionLogChanged = changes.focusSessionLog;
+      const focusTasksChanged = changes.focusTasks;
+      const activeTaskChanged = changes.activeTaskId;
+      const sessionTaskChanged = changes.currentSessionTaskId || changes.currentSessionTaskTitle;
 
-      if (!activeChanged && !modeChanged && !breakTypeChanged && !cycleChanged && !sessionsChanged && !totalSessionsChanged && !historyChanged && !focusSessionLogChanged) return;
+      if (!activeChanged && !modeChanged && !breakTypeChanged && !cycleChanged && !sessionsChanged && !totalSessionsChanged && !historyChanged && !focusSessionLogChanged && !focusTasksChanged && !activeTaskChanged && !sessionTaskChanged) return;
 
       extensionApi.storage?.local.get(
         ["isActive", "timerMode", "endTime", "focusSessions", "totalFocusSessions", "completedFocusSessionsInCycle", "customMinutes",
-          "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "isLongBreak", "breakModeEnabled", "sessionHistory", "focusSessionLog", "timeLeftSeconds"],
+          "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "isLongBreak", "breakModeEnabled", "sessionHistory", "focusSessionLog", "focusTasks", "activeTaskId", "currentSessionTaskId", "currentSessionTaskTitle", "timeLeftSeconds"],
         (res) => {
           setSessions(res.focusSessions || 0);
           setTotalFocusSessions(res.totalFocusSessions || 0);
@@ -326,6 +358,10 @@ function App() {
           setCompletedFocusSessionsInCycle(res.completedFocusSessionsInCycle || 0);
           if (res.sessionHistory) setSessionHistory(res.sessionHistory);
           if (res.focusSessionLog) setFocusSessionLog(res.focusSessionLog);
+          if (res.focusTasks) setFocusTasks(res.focusTasks);
+          if (res.activeTaskId !== undefined) setActiveTaskId(res.activeTaskId ?? null);
+          if (res.currentSessionTaskId !== undefined) setCurrentSessionTaskId(res.currentSessionTaskId ?? null);
+          if (res.currentSessionTaskTitle !== undefined) setCurrentSessionTaskTitle(res.currentSessionTaskTitle ?? null);
 
           const nextMode: TimerMode = res.timerMode || "focus";
           const nextIsLongBreak = res.isLongBreak ?? false;
@@ -397,7 +433,7 @@ function App() {
       if (extensionApi.runtime?.lastError) {
         // Fallback when service worker is unreachable
         extensionApi.storage?.local.get(
-          ["focusSessions", "totalFocusSessions", "sessionHistory", "focusSessionLog", "lastSessionDate", "timerMode", "customMinutes", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "isLongBreak", "breakModeEnabled", "plantName", "plantSpecies"],
+          ["focusSessions", "totalFocusSessions", "sessionHistory", "focusSessionLog", "lastSessionDate", "timerMode", "customMinutes", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "isLongBreak", "breakModeEnabled", "plantName", "plantSpecies", "currentSessionTaskId", "currentSessionTaskTitle"],
           (res) => {
             const mode: TimerMode = res.timerMode || "focus";
             if (mode === "break") {
@@ -416,7 +452,7 @@ function App() {
             let currentSessions = res.focusSessions || 0;
             const newTotalSessions = (res.totalFocusSessions || 0) + 1;
             const completedAt = Date.now();
-            const focusSessionLog = [...(res.focusSessionLog || []), createFocusSessionRecord(res.customMinutes || 25, completedAt)].slice(-5000);
+            const focusSessionLog = [...(res.focusSessionLog || []), createFocusSessionRecord(res.customMinutes || 25, completedAt, res.currentSessionTaskId || undefined, res.currentSessionTaskTitle || undefined)].slice(-5000);
             let history: HistoryEntry[] = res.sessionHistory || [];
             if (lastDate !== today && currentSessions > 0) {
               history = [...history, { date: lastDate, count: currentSessions }].slice(-30);
@@ -431,6 +467,8 @@ function App() {
             setTotalFocusSessions(newTotalSessions);
             setSessionHistory(history);
             setFocusSessionLog(focusSessionLog);
+            setCurrentSessionTaskId(null);
+            setCurrentSessionTaskTitle(null);
             setCompletedFocusSessionsInCycle(breakModeEnabled ? nextCycleCount : longBreakDue ? 0 : cycleCount);
             setIsLongBreak(false);
             setPlantName(getSavedPlantName(res.plantName));
@@ -445,6 +483,8 @@ function App() {
               endTime: null,
               timerMode: "focus" as const,
               isLongBreak: false,
+              currentSessionTaskId: null,
+              currentSessionTaskTitle: null,
               completedFocusSessionsInCycle: breakModeEnabled ? nextCycleCount : longBreakDue ? 0 : cycleCount,
               timeLeftSeconds: (res.customMinutes || 25) * 60,
             });
@@ -481,9 +521,21 @@ function App() {
       const modeDuration = timerMode === "focus" ? customMinutes : isLongBreak ? longBreakMinutes : breakMinutes;
       const secondsToRun = timeLeft > 0 ? timeLeft : modeDuration * 60;
       const endTime = Date.now() + secondsToRun * 1000;
+      const selectedTask = timerMode === "focus" ? focusTasks.find((task) => task.id === activeTaskId && !task.completed) : undefined;
+      const sessionTaskId = selectedTask?.id || null;
+      const sessionTaskTitle = selectedTask?.title || null;
       if (timeLeft <= 0) setTotalSeconds(modeDuration * 60);
+      setCurrentSessionTaskId(sessionTaskId);
+      setCurrentSessionTaskTitle(sessionTaskTitle);
       endTimeRef.current = endTime;
-      extensionApi?.storage?.local.set({ isActive: true, endTime, timerMode, timeLeftSeconds: secondsToRun });
+      extensionApi?.storage?.local.set({
+        isActive: true,
+        endTime,
+        timerMode,
+        timeLeftSeconds: secondsToRun,
+        currentSessionTaskId: sessionTaskId,
+        currentSessionTaskTitle: sessionTaskTitle,
+      });
       extensionApi?.runtime?.sendMessage({ type: "startTimer", endTime }, () => {
         if (extensionApi.runtime?.lastError) extensionApi.action?.setBadgeText({ text: "" });
       });
@@ -499,11 +551,13 @@ function App() {
   const resetTimer = () => {
     completingRef.current = false;
     endTimeRef.current = null;
-    extensionApi?.storage?.local.set({ isActive: false, endTime: null, timerMode: "focus", isLongBreak: false, timeLeftSeconds: customMinutes * 60 });
+    extensionApi?.storage?.local.set({ isActive: false, endTime: null, timerMode: "focus", isLongBreak: false, currentSessionTaskId: null, currentSessionTaskTitle: null, timeLeftSeconds: customMinutes * 60 });
     extensionApi?.runtime?.sendMessage({ type: "stopTimer" }, () => { void extensionApi.runtime?.lastError; });
     setIsActive(false);
     setTimerMode("focus");
     setIsLongBreak(false);
+    setCurrentSessionTaskId(null);
+    setCurrentSessionTaskTitle(null);
     setTotalSeconds(customMinutes * 60);
     setTimeLeft(customMinutes * 60);
   };
@@ -515,12 +569,14 @@ function App() {
     extensionApi?.storage?.local.set({
       customMinutes, breakMinutes, longBreakMinutes, sessionsUntilLongBreak, breakModeEnabled, plantName: savedPlantName, plantSpecies,
       dailyGoalSessions,
-      isActive: false, endTime: null, timerMode: "focus", isLongBreak: false, completedFocusSessionsInCycle: 0, timeLeftSeconds: customMinutes * 60,
+      isActive: false, endTime: null, timerMode: "focus", isLongBreak: false, completedFocusSessionsInCycle: 0, currentSessionTaskId: null, currentSessionTaskTitle: null, timeLeftSeconds: customMinutes * 60,
     });
     extensionApi?.runtime?.sendMessage({ type: "stopTimer" }, () => { void extensionApi.runtime?.lastError; });
     setIsActive(false);
     setTimerMode("focus");
     setIsLongBreak(false);
+    setCurrentSessionTaskId(null);
+    setCurrentSessionTaskTitle(null);
     setTotalSeconds(customMinutes * 60);
     setTimeLeft(customMinutes * 60);
     setPlantName(savedPlantName);
@@ -529,6 +585,48 @@ function App() {
 
   const completeOnboarding = () => {
     extensionApi?.storage?.local.set({ onboardingDone: true });
+    setView("timer");
+  };
+
+  const addTask = () => {
+    const title = taskInput.trim();
+    if (!title) return;
+    const task: FocusTask = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title,
+      createdAt: Date.now(),
+      completed: false,
+    };
+    const nextTasks = [...focusTasks, task];
+    setFocusTasks(nextTasks);
+    setActiveTaskId(task.id);
+    extensionApi?.storage?.local.set({ focusTasks: nextTasks, activeTaskId: task.id });
+    setTaskInput("");
+  };
+
+  const toggleTaskCompleted = (taskId: string) => {
+    const task = focusTasks.find((item) => item.id === taskId);
+    if (!task) return;
+    const nextTasks = focusTasks.map((item) => item.id === taskId
+      ? { ...item, completed: !item.completed }
+      : item);
+    const nextActiveTaskId = !task.completed && activeTaskId === taskId ? null : activeTaskId;
+    setFocusTasks(nextTasks);
+    setActiveTaskId(nextActiveTaskId);
+    extensionApi?.storage?.local.set({ focusTasks: nextTasks, activeTaskId: nextActiveTaskId });
+  };
+
+  const deleteTask = (taskId: string) => {
+    const nextTasks = focusTasks.filter((task) => task.id !== taskId);
+    const nextActiveTaskId = activeTaskId === taskId ? null : activeTaskId;
+    setFocusTasks(nextTasks);
+    setActiveTaskId(nextActiveTaskId);
+    extensionApi?.storage?.local.set({ focusTasks: nextTasks, activeTaskId: nextActiveTaskId });
+  };
+
+  const selectTask = (taskId: string | null) => {
+    setActiveTaskId(taskId);
+    extensionApi?.storage?.local.set({ activeTaskId: taskId });
     setView("timer");
   };
 
@@ -553,6 +651,12 @@ function App() {
   const weekTotal = last7Days.reduce((s, d) => s + d.count, 0);
   const allTimeTotal = sessionHistory.reduce((s, d) => s + d.count, 0) + sessions;
   const recentSessions = [...focusSessionLog].sort((a, b) => b.completedAt - a.completedAt).slice(0, 12);
+  const selectedTask = focusTasks.find((task) => task.id === activeTaskId && !task.completed);
+  const timerTaskLabel = timerMode === "focus" && (currentSessionTaskId || currentSessionTaskTitle)
+    ? `Session: ${currentSessionTaskTitle}`
+    : timerMode === "focus" && isActive
+      ? selectedTask ? `Next: ${selectedTask.title}` : "No task assigned"
+      : selectedTask ? `Next: ${selectedTask.title}` : "Choose a focus task";
   const dailyCounts = new Map(sessionHistory.map((entry) => [entry.date, entry.count]));
   dailyCounts.set(getToday(), sessions);
   const streakDays = Array.from({ length: 30 }, (_, i) => {
@@ -625,6 +729,7 @@ function App() {
           {view !== "onboarding" && (
             <>
               <button onClick={() => setView(view === "history" ? "timer" : "history")} className={`transition-colors ${view === "history" ? "text-white" : "text-slate-400 hover:text-white"}`}><BarChart2 size={20} /></button>
+              <button onClick={() => setView(view === "tasks" ? "timer" : "tasks")} aria-label="Tasks" className={`transition-colors ${view === "tasks" ? "text-green-300" : "text-slate-400 hover:text-white"}`}><ListTodo size={20} /></button>
               <button onClick={() => setView(view === "settings" ? "timer" : "settings")} className={`transition-colors ${view === "settings" ? "text-white" : "text-slate-400 hover:text-white"}`}><Settings size={20} /></button>
             </>
           )}
@@ -663,6 +768,70 @@ function App() {
             <button onClick={completeOnboarding} className="w-full bg-green-500 text-slate-950 font-bold p-4 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform">
               Get Started
             </button>
+          </div>
+        )}
+
+        {view === "tasks" && (
+          <div className="w-full max-h-[410px] space-y-4 overflow-y-auto pr-1">
+            <div className="text-center">
+              <h2 className="text-lg font-semibold text-white">Focus Tasks</h2>
+              <p className="mt-1 text-xs text-slate-500">Choose what you want to work on next.</p>
+            </div>
+            <form onSubmit={(event) => { event.preventDefault(); addTask(); }} className="flex gap-2">
+              <input
+                type="text"
+                value={taskInput}
+                onChange={(event) => setTaskInput(event.target.value)}
+                maxLength={80}
+                placeholder="Add a task..."
+                aria-label="New task title"
+                className="min-w-0 flex-1 rounded-xl border border-slate-800 bg-slate-900 px-3 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-green-500 focus:outline-none"
+              />
+              <button type="submit" disabled={!taskInput.trim()} aria-label="Add task" className="flex w-12 items-center justify-center rounded-xl bg-green-500 text-slate-950 transition-opacity disabled:opacity-40">
+                <Plus size={20} />
+              </button>
+            </form>
+
+            <div className="space-y-2">
+              {focusTasks.length === 0 ? (
+                <p className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-center text-xs text-slate-500">
+                  Your task list is empty. Add a task to connect it to a focus session.
+                </p>
+              ) : (
+                focusTasks.map((task) => (
+                  <div key={task.id} className={`flex items-center gap-2 rounded-xl border p-2 ${activeTaskId === task.id ? "border-green-500/50 bg-green-500/10" : "border-slate-800 bg-slate-900/70"}`}>
+                    <button
+                      type="button"
+                      onClick={() => !task.completed && selectTask(task.id)}
+                      disabled={task.completed}
+                      aria-pressed={activeTaskId === task.id}
+                      className="flex min-w-0 flex-1 items-center gap-2 p-1 text-left disabled:cursor-default"
+                    >
+                      {task.completed
+                        ? <CheckCircle2 size={18} className="shrink-0 text-slate-500" />
+                        : activeTaskId === task.id
+                          ? <CheckCircle2 size={18} className="shrink-0 text-green-400" />
+                          : <Circle size={18} className="shrink-0 text-slate-500" />}
+                      <span className={`min-w-0 flex-1 truncate text-sm ${task.completed ? "text-slate-500 line-through" : "text-slate-200"}`}>{task.title}</span>
+                      <span className="shrink-0 text-[10px] uppercase tracking-wider text-slate-500">
+                        {task.completed ? "Done" : activeTaskId === task.id ? "Selected" : "Choose"}
+                      </span>
+                    </button>
+                    <button type="button" onClick={() => toggleTaskCompleted(task.id)} aria-label={task.completed ? "Reopen task" : "Complete task"} className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-green-300">
+                      {task.completed ? <Circle size={16} /> : <Check size={16} />}
+                    </button>
+                    <button type="button" onClick={() => deleteTask(task.id)} aria-label="Delete task" className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-800 hover:text-red-300">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => selectTask(null)} className="w-full rounded-xl border border-slate-800 bg-slate-900 p-3 text-sm text-slate-300 transition-colors hover:border-slate-600">
+              Focus without a task
+            </button>
+            <p className="text-center text-xs text-slate-500">The running session keeps its task if you change the selection.</p>
           </div>
         )}
 
@@ -756,7 +925,7 @@ function App() {
                   {recentSessions.map((session) => (
                     <div key={session.id} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2.5">
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-slate-200">Focus session</p>
+                        <p className="truncate text-sm font-medium text-slate-200">{session.taskTitle || "Focus session"}</p>
                         <time className="text-xs text-slate-500" dateTime={new Date(session.completedAt).toISOString()}>
                           {formatSessionTimestamp(session.completedAt)}
                         </time>
@@ -800,6 +969,10 @@ function App() {
               {timerMode === "focus" ? "Focus" : isLongBreak ? "Long Break" : "Break"}
             </div>
             {breakModeEnabled && <p className="-mt-4 mb-5 text-xs text-slate-500">Cycle: {completedFocusSessionsInCycle} / {sessionsUntilLongBreak} focus sessions</p>}
+            <button type="button" onClick={() => setView("tasks")} className="mb-6 flex max-w-full items-center gap-2 rounded-full border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-300 transition-colors hover:border-slate-600">
+              <ListTodo size={15} className="shrink-0 text-green-400" />
+              <span className="truncate">{timerTaskLabel}</span>
+            </button>
 
             {/* Circular progress ring */}
             {(() => {

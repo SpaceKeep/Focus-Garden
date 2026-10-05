@@ -63,7 +63,7 @@ function recoverAlarmFromStorage() {
 
 function completeSessionIfActive(expected = {}) {
   chrome.storage.local.get(
-    ["isActive", "endTime", "focusSessions", "totalFocusSessions", "timerMode", "breakModeEnabled", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "customMinutes", "lastSessionDate", "sessionHistory", "focusSessionLog"],
+    ["isActive", "endTime", "focusSessions", "totalFocusSessions", "timerMode", "breakModeEnabled", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "customMinutes", "lastSessionDate", "sessionHistory", "focusSessionLog", "currentSessionTaskId", "currentSessionTaskTitle"],
     (res) => {
       if (!res.isActive) return;
 
@@ -91,7 +91,9 @@ function completeSessionIfActive(expected = {}) {
           {
             id: `${completedAt}-${Math.random().toString(36).slice(2, 8)}`,
             completedAt,
-            durationMinutes: res.customMinutes || 25
+            durationMinutes: res.customMinutes || 25,
+            ...(res.currentSessionTaskId ? { taskId: res.currentSessionTaskId } : {}),
+            ...(res.currentSessionTaskTitle ? { taskTitle: res.currentSessionTaskTitle } : {})
           }
         ].slice(-5000);
         const breakModeEnabled = res.breakModeEnabled ?? true;
@@ -115,7 +117,9 @@ function completeSessionIfActive(expected = {}) {
             completedFocusSessionsInCycle: nextCycleCount,
             lastSessionDate: today,
             sessionHistory: history,
-            focusSessionLog
+            focusSessionLog,
+            currentSessionTaskId: null,
+            currentSessionTaskTitle: null
           });
 
           scheduleAlarm(endTime);
@@ -131,7 +135,9 @@ function completeSessionIfActive(expected = {}) {
             timeLeftSeconds: (res.customMinutes || 25) * 60,
             lastSessionDate: today,
             sessionHistory: history,
-            focusSessionLog
+            focusSessionLog,
+            currentSessionTaskId: null,
+            currentSessionTaskTitle: null
           });
         }
 
@@ -145,6 +151,8 @@ function completeSessionIfActive(expected = {}) {
         endTime: null,
         timerMode: "focus",
         isLongBreak: false,
+        currentSessionTaskId: null,
+        currentSessionTaskTitle: null,
         timeLeftSeconds: (res.customMinutes || 25) * 60,
         lastSessionDate: getToday(),
         sessionHistory: res.sessionHistory || []
