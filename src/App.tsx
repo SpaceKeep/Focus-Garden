@@ -26,6 +26,12 @@ interface HistoryEntry {
   count: number;
 }
 
+interface FocusSession {
+  id: string;
+  completedAt: number;
+  durationMinutes: number;
+}
+
 interface Achievement {
   id: string;
   title: string;
@@ -51,6 +57,7 @@ interface StorageValues {
   timerMode?: TimerMode;
   timeLeftSeconds?: number;
   sessionHistory?: HistoryEntry[];
+  focusSessionLog?: FocusSession[];
   lastSessionDate?: string;
   onboardingDone?: boolean;
   plantName?: string;
@@ -97,6 +104,22 @@ function getExtensionApi(): ExtensionApi | undefined {
 
 function getToday(): string {
   return formatLocalDate(new Date());
+}
+
+function createFocusSessionRecord(durationMinutes: number, completedAt = Date.now()): FocusSession {
+  return {
+    id: `${completedAt}-${Math.random().toString(36).slice(2, 8)}`,
+    completedAt,
+    durationMinutes,
+  };
+}
+
+function formatSessionTimestamp(timestamp: number): string {
+  const date = new Date(timestamp);
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return formatLocalDate(date) === getToday()
+    ? `Today · ${time}`
+    : `${date.toLocaleDateString([], { month: "short", day: "numeric" })} · ${time}`;
 }
 
 function formatLocalDate(date: Date): string {
@@ -167,6 +190,7 @@ function App() {
   const [timerMode, setTimerMode] = useState<TimerMode>("focus");
   const [totalSeconds, setTotalSeconds] = useState(25 * 60);
   const [sessionHistory, setSessionHistory] = useState<HistoryEntry[]>([]);
+  const [focusSessionLog, setFocusSessionLog] = useState<FocusSession[]>([]);
   const [storageLoaded, setStorageLoaded] = useState(() => !getExtensionApi()?.storage);
   const [plantName, setPlantName] = useState("My Plant");
   const [plantSpecies, setPlantSpecies] = useState<PlantSpecies>("herb");
@@ -207,7 +231,7 @@ function App() {
 
     extensionApi.storage.local.get(
       ["endTime", "isActive", "focusSessions", "totalFocusSessions", "customMinutes", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "isLongBreak",
-        "breakModeEnabled", "timerMode", "timeLeftSeconds", "sessionHistory",
+        "breakModeEnabled", "timerMode", "timeLeftSeconds", "sessionHistory", "focusSessionLog",
         "lastSessionDate", "onboardingDone", "plantName", "plantSpecies", "dailyGoalSessions"],
       (res) => {
         // Daily reset
@@ -227,6 +251,7 @@ function App() {
         setSessions(currentSessions);
         setTotalFocusSessions(res.totalFocusSessions || 0);
         setSessionHistory(history);
+        setFocusSessionLog(res.focusSessionLog || []);
         setPlantName(getSavedPlantName(res.plantName));
         setPlantSpecies(getStoredPlantSpecies(res.plantSpecies));
         setDailyGoalSessions(Math.min(24, Math.max(1, res.dailyGoalSessions || 4)));
@@ -287,18 +312,20 @@ function App() {
       const sessionsChanged = changes.focusSessions;
       const totalSessionsChanged = changes.totalFocusSessions;
       const historyChanged = changes.sessionHistory;
+      const focusSessionLogChanged = changes.focusSessionLog;
 
-      if (!activeChanged && !modeChanged && !breakTypeChanged && !cycleChanged && !sessionsChanged && !totalSessionsChanged && !historyChanged) return;
+      if (!activeChanged && !modeChanged && !breakTypeChanged && !cycleChanged && !sessionsChanged && !totalSessionsChanged && !historyChanged && !focusSessionLogChanged) return;
 
       extensionApi.storage?.local.get(
         ["isActive", "timerMode", "endTime", "focusSessions", "totalFocusSessions", "completedFocusSessionsInCycle", "customMinutes",
-          "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "isLongBreak", "breakModeEnabled", "sessionHistory", "timeLeftSeconds"],
+          "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "isLongBreak", "breakModeEnabled", "sessionHistory", "focusSessionLog", "timeLeftSeconds"],
         (res) => {
           setSessions(res.focusSessions || 0);
           setTotalFocusSessions(res.totalFocusSessions || 0);
           setBreakModeEnabled(res.breakModeEnabled ?? true);
           setCompletedFocusSessionsInCycle(res.completedFocusSessionsInCycle || 0);
           if (res.sessionHistory) setSessionHistory(res.sessionHistory);
+          if (res.focusSessionLog) setFocusSessionLog(res.focusSessionLog);
 
           const nextMode: TimerMode = res.timerMode || "focus";
           const nextIsLongBreak = res.isLongBreak ?? false;
@@ -370,7 +397,7 @@ function App() {
       if (extensionApi.runtime?.lastError) {
         // Fallback when service worker is unreachable
         extensionApi.storage?.local.get(
-          ["focusSessions", "totalFocusSessions", "sessionHistory", "lastSessionDate", "timerMode", "customMinutes", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "isLongBreak", "breakModeEnabled", "plantName", "plantSpecies"],
+          ["focusSessions", "totalFocusSessions", "sessionHistory", "focusSessionLog", "lastSessionDate", "timerMode", "customMinutes", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "isLongBreak", "breakModeEnabled", "plantName", "plantSpecies"],
           (res) => {
             const mode: TimerMode = res.timerMode || "focus";
             if (mode === "break") {
@@ -388,6 +415,8 @@ function App() {
             const lastDate = res.lastSessionDate || today;
             let currentSessions = res.focusSessions || 0;
             const newTotalSessions = (res.totalFocusSessions || 0) + 1;
+            const completedAt = Date.now();
+            const focusSessionLog = [...(res.focusSessionLog || []), createFocusSessionRecord(res.customMinutes || 25, completedAt)].slice(-5000);
             let history: HistoryEntry[] = res.sessionHistory || [];
             if (lastDate !== today && currentSessions > 0) {
               history = [...history, { date: lastDate, count: currentSessions }].slice(-30);
@@ -401,6 +430,7 @@ function App() {
             setSessions(newSessions);
             setTotalFocusSessions(newTotalSessions);
             setSessionHistory(history);
+            setFocusSessionLog(focusSessionLog);
             setCompletedFocusSessionsInCycle(breakModeEnabled ? nextCycleCount : longBreakDue ? 0 : cycleCount);
             setIsLongBreak(false);
             setPlantName(getSavedPlantName(res.plantName));
@@ -410,6 +440,7 @@ function App() {
               totalFocusSessions: newTotalSessions,
               lastSessionDate: today,
               sessionHistory: history,
+              focusSessionLog,
               isActive: false,
               endTime: null,
               timerMode: "focus" as const,
@@ -521,6 +552,7 @@ function App() {
   const maxCount = Math.max(...last7Days.map((d) => d.count), 1);
   const weekTotal = last7Days.reduce((s, d) => s + d.count, 0);
   const allTimeTotal = sessionHistory.reduce((s, d) => s + d.count, 0) + sessions;
+  const recentSessions = [...focusSessionLog].sort((a, b) => b.completedAt - a.completedAt).slice(0, 12);
   const dailyCounts = new Map(sessionHistory.map((entry) => [entry.date, entry.count]));
   dailyCounts.set(getToday(), sessions);
   const streakDays = Array.from({ length: 30 }, (_, i) => {
@@ -709,6 +741,31 @@ function App() {
                 <p className="text-2xl font-bold text-orange-300">{currentStreak} 🔥</p>
                 <p className="text-xs text-slate-500 mt-1">Day Streak</p>
               </div>
+            </div>
+            <div className="mt-5">
+              <div className="mb-3 flex items-center justify-center gap-2 text-xs text-slate-500 uppercase tracking-widest">
+                <Check size={14} />
+                Recent Sessions
+              </div>
+              {recentSessions.length === 0 ? (
+                <p className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-center text-xs text-slate-500">
+                  Complete a focus session to see it here.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {recentSessions.map((session) => (
+                    <div key={session.id} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-200">Focus session</p>
+                        <time className="text-xs text-slate-500" dateTime={new Date(session.completedAt).toISOString()}>
+                          {formatSessionTimestamp(session.completedAt)}
+                        </time>
+                      </div>
+                      <span className="ml-3 shrink-0 text-sm font-semibold text-green-300">{session.durationMinutes} min</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="mt-5">
               <div className="flex items-center justify-center gap-2 text-xs text-slate-500 uppercase tracking-widest mb-3">

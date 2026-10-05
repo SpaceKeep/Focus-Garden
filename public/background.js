@@ -63,7 +63,7 @@ function recoverAlarmFromStorage() {
 
 function completeSessionIfActive(expected = {}) {
   chrome.storage.local.get(
-    ["isActive", "endTime", "focusSessions", "totalFocusSessions", "timerMode", "breakModeEnabled", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "customMinutes", "lastSessionDate", "sessionHistory"],
+    ["isActive", "endTime", "focusSessions", "totalFocusSessions", "timerMode", "breakModeEnabled", "breakMinutes", "longBreakMinutes", "sessionsUntilLongBreak", "completedFocusSessionsInCycle", "customMinutes", "lastSessionDate", "sessionHistory", "focusSessionLog"],
     (res) => {
       if (!res.isActive) return;
 
@@ -85,6 +85,15 @@ function completeSessionIfActive(expected = {}) {
 
         const newSessions = currentSessions + 1;
         const newTotalSessions = (res.totalFocusSessions || 0) + 1;
+        const completedAt = Date.now();
+        const focusSessionLog = [
+          ...(res.focusSessionLog || []),
+          {
+            id: `${completedAt}-${Math.random().toString(36).slice(2, 8)}`,
+            completedAt,
+            durationMinutes: res.customMinutes || 25
+          }
+        ].slice(-5000);
         const breakModeEnabled = res.breakModeEnabled ?? true;
         const cycleCount = (res.completedFocusSessionsInCycle || 0) + 1;
         const sessionsUntilLongBreak = Math.min(12, Math.max(2, res.sessionsUntilLongBreak || 4));
@@ -105,7 +114,8 @@ function completeSessionIfActive(expected = {}) {
             timeLeftSeconds: nextBreakMinutes * 60,
             completedFocusSessionsInCycle: nextCycleCount,
             lastSessionDate: today,
-            sessionHistory: history
+            sessionHistory: history,
+            focusSessionLog
           });
 
           scheduleAlarm(endTime);
@@ -120,7 +130,8 @@ function completeSessionIfActive(expected = {}) {
             completedFocusSessionsInCycle: nextCycleCount,
             timeLeftSeconds: (res.customMinutes || 25) * 60,
             lastSessionDate: today,
-            sessionHistory: history
+            sessionHistory: history,
+            focusSessionLog
           });
         }
 
